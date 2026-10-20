@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate Android debug build",
+			"type": "shell",
+			"command": "./gradlew",
+			"args": [
+				":app:assembleDebug"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
