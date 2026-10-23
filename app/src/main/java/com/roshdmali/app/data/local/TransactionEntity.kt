@@ -26,12 +26,32 @@ import androidx.room.PrimaryKey
             childColumns = ["reversesTransactionId"],
             onDelete = ForeignKey.RESTRICT,
         ),
+        ForeignKey(
+            entity = CategoryEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["categoryId"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
+        ForeignKey(
+            entity = CounterpartyEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["counterpartyId"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
+        ForeignKey(
+            entity = CategoryEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["categoryId"],
+            onDelete = ForeignKey.RESTRICT,
+        ),
     ],
     indices = [
         Index(value = ["createdAtMillis"]),
         Index(value = ["accountId"]),
         Index(value = ["operationId"], unique = true),
         Index(value = ["reversesTransactionId"], unique = true),
+        Index(value = ["categoryId"]),
+        Index(value = ["counterpartyId"]),
     ],
 )
 data class TransactionEntity(
@@ -45,6 +65,10 @@ data class TransactionEntity(
     val createdAtMillis: Long,
     val occurredOnEpochDay: Long?,
     val reversesTransactionId: String?,
+    val categoryId: String?,
+    val counterpartyId: String?,
+    val counterpartyNameSnapshot: String?,
+    val notes: String?,
 )
 
 @Entity(

@@ -138,3 +138,62 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         )
     }
 }
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS categories (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                normalizedName TEXT NOT NULL,
+                transactionType TEXT NOT NULL,
+                isActive INTEGER NOT NULL,
+                createdAtMillis INTEGER
+            )""".trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS index_categories_transactionType_normalizedName " +
+                "ON categories(transactionType, normalizedName)",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS counterparties (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                normalizedName TEXT NOT NULL,
+                isActive INTEGER NOT NULL,
+                createdAtMillis INTEGER
+            )""".trimIndent(),
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_counterparties_normalizedName ON counterparties(normalizedName)")
+
+        db.execSQL(
+            """INSERT OR IGNORE INTO categories (
+                id, name, normalizedName, transactionType, isActive, createdAtMillis
+            )
+            SELECT 'legacy-category:' || type || ':' || lower(trim(category)),
+                trim(category), lower(trim(category)), type, 1, NULL
+            FROM transactions
+            WHERE trim(category) <> ''""".trimIndent(),
+        )
+
+        db.execSQL(
+            "ALTER TABLE transactions ADD COLUMN categoryId TEXT REFERENCES categories(id) ON DELETE RESTRICT",
+        )
+        db.execSQL(
+            "ALTER TABLE transactions ADD COLUMN counterpartyId TEXT REFERENCES counterparties(id) ON DELETE RESTRICT",
+        )
+        db.execSQL("ALTER TABLE transactions ADD COLUMN counterpartyNameSnapshot TEXT")
+        db.execSQL("ALTER TABLE transactions ADD COLUMN notes TEXT")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_categoryId ON transactions(categoryId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_counterpartyId ON transactions(counterpartyId)")
+        db.execSQL(
+            """UPDATE transactions
+            SET categoryId = (
+                SELECT categories.id FROM categories
+                WHERE categories.transactionType = transactions.type
+                    AND categories.normalizedName = lower(trim(transactions.category))
+                LIMIT 1
+            )""".trimIndent(),
+        )
+    }
+}

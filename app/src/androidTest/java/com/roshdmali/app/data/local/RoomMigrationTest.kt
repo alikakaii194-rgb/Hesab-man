@@ -20,7 +20,7 @@ class RoomMigrationTest {
     )
 
     @Test
-    fun migrationOneToTwoPreservesLegacyTransactionsAndBalancesLedger() {
+    fun migrationOneToThreePreservesLegacyTransactionsAndAddsCategoryLinks() {
         val oldDatabase = helper.createDatabase(TEST_DATABASE, 1)
         oldDatabase.execSQL(
             """INSERT INTO transactions
@@ -36,13 +36,14 @@ class RoomMigrationTest {
 
         val migrated = helper.runMigrationsAndValidate(
             TEST_DATABASE,
-            2,
+            3,
             true,
             MIGRATION_1_2,
+            MIGRATION_2_3,
         )
         try {
             migrated.query(
-                "SELECT id, type, title, amountToman, category, createdAtMillis, occurredOnEpochDay, accountId FROM transactions ORDER BY id",
+                "SELECT id, type, title, amountToman, category, createdAtMillis, occurredOnEpochDay, accountId, categoryId, counterpartyId, counterpartyNameSnapshot, notes FROM transactions ORDER BY id",
             ).use { cursor ->
                 assertTrue(cursor.moveToNext())
                 assertEquals("legacy-expense", cursor.getString(0))
@@ -53,6 +54,10 @@ class RoomMigrationTest {
                 assertEquals(1700000000456L, cursor.getLong(5))
                 assertTrue(cursor.isNull(6))
                 assertEquals(LEGACY_ACCOUNT_ID, cursor.getString(7))
+                assertEquals("legacy-category:EXPENSE:خوراک", cursor.getString(8))
+                assertTrue(cursor.isNull(9))
+                assertTrue(cursor.isNull(10))
+                assertTrue(cursor.isNull(11))
 
                 assertTrue(cursor.moveToNext())
                 assertEquals("legacy-income", cursor.getString(0))
@@ -63,6 +68,10 @@ class RoomMigrationTest {
                 assertEquals(1700000000123L, cursor.getLong(5))
                 assertTrue(cursor.isNull(6))
                 assertEquals(LEGACY_ACCOUNT_ID, cursor.getString(7))
+                assertEquals("legacy-category:INCOME:حقوق", cursor.getString(8))
+                assertTrue(cursor.isNull(9))
+                assertTrue(cursor.isNull(10))
+                assertTrue(cursor.isNull(11))
                 assertFalse(cursor.moveToNext())
             }
 
@@ -74,6 +83,10 @@ class RoomMigrationTest {
             migrated.query(
                 "SELECT amountToman FROM account_openings WHERE accountId = '$LEGACY_ACCOUNT_ID'",
             ).use { cursor -> assertEquals(0, cursor.count) }
+            migrated.query("SELECT COUNT(*) FROM categories").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(2, cursor.getInt(0))
+            }
 
             migrated.query(
                 """SELECT SUM(CASE WHEN side = 'DEBIT' THEN amountToman ELSE 0 END),
@@ -90,7 +103,7 @@ class RoomMigrationTest {
     }
 
     private companion object {
-        const val TEST_DATABASE = "migration-1-to-2-test"
+        const val TEST_DATABASE = "migration-1-to-3-test"
         const val LEGACY_ACCOUNT_ID = "legacy-unassigned"
     }
 }

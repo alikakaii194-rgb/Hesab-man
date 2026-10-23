@@ -126,6 +126,7 @@ fun HomeScreen(viewModel: FinanceViewModel, modifier: Modifier = Modifier) {
                     showAccountDialog = false
                     snackbarHostState.showSnackbar("حساب ساخته شد.")
                 }
+                FinanceEvent.MetadataChanged -> snackbarHostState.showSnackbar("اطلاعات ذخیره شد.")
                 is FinanceEvent.Error -> snackbarHostState.showSnackbar(event.message)
             }
         }

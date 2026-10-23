@@ -88,6 +88,35 @@ class FinancialTransactionTest {
     }
 
     @Test
+    fun transactionFiltersCombineQueryTypeAccountMetadataAndDateRange() {
+        val matching = transaction(TransactionType.EXPENSE, 300L).copy(
+            id = "matching",
+            accountId = "cash",
+            categoryId = "food",
+            counterpartyId = "shop",
+            counterpartyNameSnapshot = "فروشگاه مرکزی",
+            occurredOnEpochDay = 20_000L,
+        )
+        val outsideRange = matching.copy(id = "outside", occurredOnEpochDay = 19_000L)
+        val noDate = matching.copy(id = "no-date", occurredOnEpochDay = null)
+
+        val results = filterTransactions(
+            listOf(matching, outsideRange, noDate),
+            TransactionFilters(
+                query = "مرکزی",
+                type = TransactionType.EXPENSE,
+                accountId = "cash",
+                categoryId = "food",
+                counterpartyId = "shop",
+                startEpochDay = 19_500L,
+                endEpochDay = 20_500L,
+            ),
+        )
+
+        assertEquals(listOf("matching"), results.map(FinancialTransaction::id))
+    }
+
+    @Test
     fun ledgerOperationsRequireEqualDebitAndCreditTotals() {
         assertTrue(
             isLedgerBalanced(
@@ -105,6 +134,27 @@ class FinancialTransactionTest {
     fun formatsTomanWithPersianDigitsAndGrouping() {
         assertEquals("۱,۲۳۴,۵۶۷", formatTomanAmount(BigInteger.valueOf(1_234_567L)))
         assertEquals("-۱۲", formatTomanAmount(BigInteger.valueOf(-12L)))
+    }
+
+    @Test
+    fun groupsValidAmountInputAndKeepsCursorByDigitPosition() {
+        assertEquals(
+            AmountInputFormatting("12,345,678", 8),
+            formatAmountInput("12345678", 6),
+        )
+        assertEquals(
+            AmountInputFormatting("1,2", 3),
+            formatAmountInput("1,2", 3),
+        )
+        assertEquals(1_234_567L, parseTomanAmount(formatAmountInput("1234567", 7).text))
+    }
+
+    @Test
+    fun spellsTomanAmountsInPersian() {
+        assertEquals("دوازده میلیون و پانصد هزار تومان", tomanAmountInPersianWords(12_500_000L))
+        assertEquals("یک تومان", tomanAmountInPersianWords(1L))
+        assertNull(tomanAmountInPersianWords(0L))
+        assertNull(tomanAmountInPersianWords(-1L))
     }
 
     @Test

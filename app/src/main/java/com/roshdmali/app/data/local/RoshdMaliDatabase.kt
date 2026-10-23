@@ -13,8 +13,10 @@ import androidx.room.RoomDatabase
         LedgerEntryEntity::class,
         TransactionEntity::class,
         LegacyTransactionV1Entity::class,
+        CategoryEntity::class,
+        CounterpartyEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class RoshdMaliDatabase : RoomDatabase() {
@@ -22,6 +24,8 @@ abstract class RoshdMaliDatabase : RoomDatabase() {
     abstract fun financialOperationDao(): FinancialOperationDao
     abstract fun ledgerEntryDao(): LedgerEntryDao
     abstract fun transactionDao(): TransactionDao
+    abstract fun categoryDao(): CategoryDao
+    abstract fun counterpartyDao(): CounterpartyDao
 
     companion object {
         @Volatile
@@ -33,7 +37,7 @@ abstract class RoshdMaliDatabase : RoomDatabase() {
                     context.applicationContext,
                     RoshdMaliDatabase::class.java,
                     "roshd-mali.db",
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }
