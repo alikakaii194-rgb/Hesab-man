@@ -104,9 +104,21 @@ data class FinancialSummary(
 fun summarizeTransactions(transactions: List<FinancialTransaction>): FinancialSummary {
     var income = BigInteger.ZERO
     var expense = BigInteger.ZERO
+    val byId = transactions.associateBy(FinancialTransaction::id)
 
     transactions.forEach { transaction ->
         val amount = BigInteger.valueOf(transaction.amountToman)
+        val reversedTransactionId = transaction.reversesTransactionId
+        if (reversedTransactionId != null) {
+            val original = requireNotNull(byId[reversedTransactionId]) {
+                "Reversal transaction references a missing original transaction."
+            }
+            when (original.type) {
+                TransactionType.INCOME -> income -= amount
+                TransactionType.EXPENSE -> expense -= amount
+            }
+            return@forEach
+        }
         when (transaction.type) {
             TransactionType.INCOME -> income += amount
             TransactionType.EXPENSE -> expense += amount
@@ -130,19 +142,41 @@ fun parseRialAmount(input: String, allowZero: Boolean = false): Long? {
 }
 
 fun parseUnsignedInteger(input: String): Long? {
-    val normalized = buildString(input.length) {
-        input.forEach { character ->
-            when (character) {
-                in '۰'..'۹' -> append(character.code - '۰'.code)
-                in '٠'..'٩' -> append(character.code - '٠'.code)
-                ',', '٬', ' ', '\u00a0' -> Unit
-                else -> append(character)
+    val source = input.trim()
+    if (source.isEmpty()) return null
+    val digits = StringBuilder(source.length)
+    var groupLength = 0
+    var hasGrouping = false
+    var previousWasSeparator = false
+
+    source.forEach { character ->
+        val normalizedDigit = when (character) {
+            in '۰'..'۹' -> character.code - '۰'.code
+            in '٠'..'٩' -> character.code - '٠'.code
+            in '0'..'9' -> character.code - '0'.code
+            else -> null
+        }
+        if (normalizedDigit != null) {
+            digits.append(('0'.code + normalizedDigit).toChar())
+            groupLength += 1
+            previousWasSeparator = false
+        } else if (character == ',' || character == '٬' || character == ' ' || character == '\u00a0') {
+            if (previousWasSeparator) return null
+            if (!hasGrouping) {
+                if (groupLength !in 1..3) return null
+                hasGrouping = true
+            } else if (groupLength != 3) {
+                return null
             }
+            groupLength = 0
+            previousWasSeparator = true
+        } else {
+            return null
         }
     }
 
-    if (normalized.isEmpty() || normalized.any { !it.isDigit() }) return null
-    return normalized.toLongOrNull()
+    if (digits.isEmpty() || (hasGrouping && groupLength != 3)) return null
+    return digits.toString().toLongOrNull()
 }
 
 fun formatTomanAmount(amount: BigInteger): String {

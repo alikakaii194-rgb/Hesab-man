@@ -23,6 +23,8 @@ class FinancialTransactionTest {
         assertNull(parseTomanAmount("۰"))
         assertNull(parseTomanAmount("12.5"))
         assertNull(parseTomanAmount("-12"))
+        assertNull(parseTomanAmount("1,2"))
+        assertNull(parseTomanAmount("12,34,567"))
         assertNull(parseTomanAmount("۹۲۲۳۳۷۲۰۳۶۸۵۴۷۷۵۸۰۸"))
         assertEquals(0L, parseTomanAmount("۰", allowZero = true))
         assertEquals(0L, parseRialAmount("۰", allowZero = true))
@@ -64,6 +66,25 @@ class FinancialTransactionTest {
         )
 
         assertEquals(BigInteger.valueOf(-20L), calculateAccountBalance(postings))
+    }
+
+    @Test
+    fun reversedIncomeAndExpenseDoNotCountAsNewPnl() {
+        val income = transaction(TransactionType.INCOME, 10_000L)
+        val expense = transaction(TransactionType.EXPENSE, 3_000L)
+        val reversedIncome = transaction(TransactionType.EXPENSE, 10_000L).copy(
+            id = "reverse-income",
+            reversesTransactionId = income.id,
+        )
+        val reversedExpense = transaction(TransactionType.INCOME, 3_000L).copy(
+            id = "reverse-expense",
+            reversesTransactionId = expense.id,
+        )
+
+        val summary = summarizeTransactions(listOf(income, expense, reversedIncome, reversedExpense))
+
+        assertEquals(BigInteger.ZERO, summary.totalIncomeToman)
+        assertEquals(BigInteger.ZERO, summary.totalExpenseToman)
     }
 
     @Test

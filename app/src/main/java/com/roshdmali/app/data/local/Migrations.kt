@@ -4,7 +4,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
-    override fun migrate(database: SupportSQLiteDatabase) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val database = db
         database.execSQL("ALTER TABLE transactions RENAME TO transactions_legacy_v1")
         database.execSQL("DROP INDEX IF EXISTS index_transactions_occurredAtMillis")
         database.execSQL(

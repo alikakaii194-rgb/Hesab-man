@@ -14,6 +14,9 @@ interface AccountDao {
     @Query("SELECT * FROM account_openings")
     fun observeOpenings(): Flow<List<AccountOpeningEntity>>
 
+    @Query("SELECT * FROM account_openings WHERE accountId = :accountId LIMIT 1")
+    suspend fun getOpening(accountId: String): AccountOpeningEntity?
+
     @Query("SELECT * FROM accounts WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): AccountEntity?
 

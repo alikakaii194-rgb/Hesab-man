@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 data class FinanceUiState(
     val isAccountsLoading: Boolean = true,
@@ -29,6 +30,7 @@ data class FinanceUiState(
 
 sealed interface FinanceEvent {
     data object TransactionSaved : FinanceEvent
+    data object TransactionReversed : FinanceEvent
     data object AccountCreated : FinanceEvent
     data class Error(val message: String) : FinanceEvent
 }
@@ -100,6 +102,24 @@ class FinanceViewModel(
                 mutableState.update { it.copy(isSaving = false) }
                 eventChannel.send(
                     FinanceEvent.Error(exception.localizedMessage ?: "ذخیره تراکنش انجام نشد."),
+                )
+            }
+        }
+    }
+
+    fun reverseTransaction(transactionId: String) {
+        if (mutableState.value.isSaving) return
+
+        viewModelScope.launch {
+            mutableState.update { it.copy(isSaving = true) }
+            try {
+                repository.reverseTransaction(transactionId, UUID.randomUUID().toString())
+                mutableState.update { it.copy(isSaving = false) }
+                eventChannel.send(FinanceEvent.TransactionReversed)
+            } catch (exception: Exception) {
+                mutableState.update { it.copy(isSaving = false) }
+                eventChannel.send(
+                    FinanceEvent.Error(exception.localizedMessage ?: "لغو تراکنش انجام نشد."),
                 )
             }
         }

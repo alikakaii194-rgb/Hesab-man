@@ -102,6 +102,7 @@ fun HomeScreen(viewModel: FinanceViewModel, modifier: Modifier = Modifier) {
     var entryType by remember { mutableStateOf<TransactionType?>(null) }
     var selectedAccountId by rememberSaveable { mutableStateOf("") }
     var showAccountDialog by rememberSaveable { mutableStateOf(false) }
+    var transactionToReverse by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedPage = FinancePage.valueOf(selectedPageName)
 
     LaunchedEffect(state.accounts) {
@@ -116,6 +117,10 @@ fun HomeScreen(viewModel: FinanceViewModel, modifier: Modifier = Modifier) {
                 FinanceEvent.TransactionSaved -> {
                     entryType = null
                     snackbarHostState.showSnackbar("تراکنش ذخیره شد.")
+                }
+                FinanceEvent.TransactionReversed -> {
+                    transactionToReverse = null
+                    snackbarHostState.showSnackbar("تراکنش با ثبت معکوس لغو شد.")
                 }
                 FinanceEvent.AccountCreated -> {
                     showAccountDialog = false
@@ -172,7 +177,11 @@ fun HomeScreen(viewModel: FinanceViewModel, modifier: Modifier = Modifier) {
                 },
                 modifier = Modifier.padding(padding),
             )
-            FinancePage.TRANSACTIONS -> TransactionsPage(state, Modifier.padding(padding))
+            FinancePage.TRANSACTIONS -> TransactionsPage(
+                state = state,
+                onReverse = { transactionToReverse = it },
+                modifier = Modifier.padding(padding),
+            )
             FinancePage.BUDGET -> PendingPage(
                 "بودجه‌بندی",
                 "بخش بودجه هنوز برای ثبت و پیگیری بودجه آماده نیست.",
@@ -199,6 +208,26 @@ fun HomeScreen(viewModel: FinanceViewModel, modifier: Modifier = Modifier) {
         )
     }
 
+    transactionToReverse?.let { transactionId ->
+        AlertDialog(
+            onDismissRequest = { if (!state.isSaving) transactionToReverse = null },
+            title = { Text("لغو تراکنش") },
+            text = { Text("یک ثبت معکوس ساخته می‌شود و سابقه اصلی حذف نخواهد شد.") },
+            confirmButton = {
+                Button(
+                    enabled = !state.isSaving,
+                    onClick = { viewModel.reverseTransaction(transactionId) },
+                ) { Text(if (state.isSaving) "در حال ثبت…" else "تأیید لغو") }
+            },
+            dismissButton = {
+                TextButton(onClick = { transactionToReverse = null }, enabled = !state.isSaving) {
+                    Text("بازگشت")
+                }
+            },
+            containerColor = WarmBackground,
+        )
+    }
+
     entryType?.let { type ->
         TransactionEntryDialog(
             type = type,
@@ -222,7 +251,14 @@ private fun DashboardPage(
 ) {
     val hasTransactions = state.transactions.isNotEmpty()
     val hasAccounts = state.accounts.isNotEmpty()
-    val summary = remember(state.transactions) { summarizeTransactions(state.transactions) }
+    val currentEpochDay = LocalDate.now().toEpochDay()
+    val summaryTransactions = remember(state.transactions, currentEpochDay) {
+        state.transactions.filter { transaction ->
+            transaction.occurredOnEpochDay == null || transaction.occurredOnEpochDay <= currentEpochDay
+        }
+    }
+    val hasSummaryTransactions = summaryTransactions.isNotEmpty()
+    val summary = remember(summaryTransactions) { summarizeTransactions(summaryTransactions) }
     val totalAccountBalance = remember(state.accounts) {
         state.accounts.fold(BigInteger.ZERO) { total, account -> total + account.balanceToman }
     }
@@ -234,8 +270,8 @@ private fun DashboardPage(
     ) {
         SummaryCard("موجودی حساب‌ها", totalAccountBalance, hasAccounts, emphasized = true)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SummaryCard("مجموع درآمد", summary.totalIncomeToman, hasTransactions, Modifier.weight(1f))
-            SummaryCard("مجموع هزینه", summary.totalExpenseToman, hasTransactions, Modifier.weight(1f))
+            SummaryCard("مجموع درآمد", summary.totalIncomeToman, hasSummaryTransactions, Modifier.weight(1f))
+            SummaryCard("مجموع هزینه", summary.totalExpenseToman, hasSummaryTransactions, Modifier.weight(1f))
         }
         if (state.isLoading) {
             Text("در حال خواندن اطلاعات ذخیره‌شده…", color = MutedInk)
@@ -295,7 +331,11 @@ private fun DashboardPage(
             }
             else -> {
                 Text("تراکنش‌های اخیر", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                state.transactions.take(5).forEach { TransactionRow(it) }
+                state.transactions.take(5).forEach { transaction ->
+                    val accountName = state.accounts.firstOrNull { it.account.id == transaction.accountId }
+                        ?.account?.name
+                    TransactionRow(transaction, accountName)
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -367,7 +407,11 @@ private fun AccountType.toPersianLabel(): String = when (this) {
 }
 
 @Composable
-private fun TransactionsPage(state: FinanceUiState, modifier: Modifier = Modifier) {
+private fun TransactionsPage(
+    state: FinanceUiState,
+    onReverse: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     when {
         state.isLoading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("در حال خواندن اطلاعات ذخیره‌شده…", color = MutedInk)
@@ -383,6 +427,7 @@ private fun TransactionsPage(state: FinanceUiState, modifier: Modifier = Modifie
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item { Text("همه تراکنش‌ها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            val reversedTransactionIds = state.transactions.mapNotNull(FinancialTransaction::reversesTransactionId).toSet()
             items(state.transactions, key = { it.id }) { transaction ->
                 val accountName = state.accounts
                     .firstOrNull { it.account.id == transaction.accountId }
@@ -392,14 +437,23 @@ private fun TransactionsPage(state: FinanceUiState, modifier: Modifier = Modifie
                     } else {
                         "حساب غیرفعال"
                     }
-                TransactionRow(transaction, accountName)
+                val canReverse = transaction.reversesTransactionId == null && transaction.id !in reversedTransactionIds
+                    if (canReverse) {
+                        TransactionRow(transaction, accountName) { onReverse(transaction.id) }
+                    } else {
+                        TransactionRow(transaction, accountName)
+                    }
             }
         }
     }
 }
 
 @Composable
-private fun TransactionRow(transaction: FinancialTransaction, accountName: String? = null) {
+private fun TransactionRow(
+    transaction: FinancialTransaction,
+    accountName: String? = null,
+    onReverse: (() -> Unit)? = null,
+) {
     val isIncome = transaction.type == TransactionType.INCOME
     Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Row(
@@ -429,6 +483,9 @@ private fun TransactionRow(transaction: FinancialTransaction, accountName: Strin
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
+            onReverse?.let { reverse ->
+                TextButton(onClick = reverse) { Text("لغو") }
+            }
         }
     }
 }
@@ -490,7 +547,13 @@ private fun AccountCreationDialog(
                         )
                     }
                 }
-                MoneyUnitSelector(unit, enabled = !isSaving) { unit = it }
+                MoneyUnitSelector(unit, enabled = !isSaving) {
+                    if (unit != it) {
+                        unit = it
+                        amount = ""
+                        error = null
+                    }
+                }
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it; error = null },
@@ -616,7 +679,13 @@ private fun TransactionEntryDialog(
                     enabled = !isSaving,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                MoneyUnitSelector(amountUnit, enabled = !isSaving) { amountUnit = it }
+                MoneyUnitSelector(amountUnit, enabled = !isSaving) {
+                    if (amountUnit != it) {
+                        amountUnit = it
+                        amount = ""
+                        error = null
+                    }
+                }
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it; error = null },

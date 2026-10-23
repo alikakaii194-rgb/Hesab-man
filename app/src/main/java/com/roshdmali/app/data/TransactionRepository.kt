@@ -20,6 +20,7 @@ import com.roshdmali.app.domain.TransactionType
 import com.roshdmali.app.domain.calculateAccountBalance
 import com.roshdmali.app.domain.isLedgerBalanced
 import java.math.BigInteger
+import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -31,6 +32,7 @@ interface TransactionRepository {
     suspend fun getTransactions(): List<FinancialTransaction>
     suspend fun createAccount(draft: AccountDraft): Account
     suspend fun addTransaction(draft: TransactionDraft): FinancialTransaction
+    suspend fun reverseTransaction(transactionId: String, idempotencyKey: String): FinancialTransaction
 }
 
 class RoomTransactionRepository(
@@ -46,7 +48,7 @@ class RoomTransactionRepository(
 
     override fun observeAccountBalances(): Flow<List<AccountBalance>> = combine(
         accountDao.observeUserAccounts(),
-        ledgerEntryDao.observeAll(),
+        ledgerEntryDao.observeEntriesThrough(LocalDate.now().toEpochDay()),
     ) { accounts, entries ->
         accounts.map { entity ->
             val postings = entries.asSequence()
@@ -76,8 +78,15 @@ class RoomTransactionRepository(
             require(existingOperation.kind == ACCOUNT_OPENING_KIND) {
                 "Idempotency key has already been used for another operation."
             }
-            val existingAccountId = requireNotNull(existingOperation.accountId)
-            return@withTransaction requireNotNull(accountDao.getById(existingAccountId)).toDomain()
+            val existingAccount = requireNotNull(accountDao.getById(requireNotNull(existingOperation.accountId)))
+            val existingOpening = requireNotNull(accountDao.getOpening(existingAccount.id))
+            require(
+                existingAccount.name == draft.name.trim() &&
+                    existingAccount.type == draft.type.name &&
+                    existingOpening.amountToman == draft.openingAmountToman &&
+                    existingOpening.effectiveEpochDay == draft.effectiveEpochDay
+            ) { "Idempotency key was reused with different account data." }
+            return@withTransaction existingAccount.toDomain()
         }
 
         val accountId = UUID.randomUUID().toString()
@@ -146,9 +155,18 @@ class RoomTransactionRepository(
             require(existingOperation.kind == draft.type.name) {
                 "Idempotency key has already been used for another operation."
             }
-            return@withTransaction requireNotNull(
+            val existing = requireNotNull(
                 transactionDao.getByOperationId(existingOperation.id),
-            ).toDomain()
+            )
+            require(
+                existing.accountId == draft.accountId &&
+                    existing.type == draft.type.name &&
+                    existing.title == draft.title.trim() &&
+                    existing.amountToman == draft.amountToman &&
+                    existing.category == draft.category.trim() &&
+                    existing.occurredOnEpochDay == draft.occurredOnEpochDay
+            ) { "Idempotency key was reused with different transaction data." }
+            return@withTransaction existing.toDomain()
         }
 
         val account = requireNotNull(accountDao.getById(draft.accountId)) {
@@ -198,6 +216,85 @@ class RoomTransactionRepository(
         transaction.toDomain()
     }
 
+    override suspend fun reverseTransaction(
+        transactionId: String,
+        idempotencyKey: String,
+    ): FinancialTransaction = database.withTransaction {
+        require(idempotencyKey.isNotBlank())
+        val original = requireNotNull(transactionDao.getById(transactionId)) {
+            "Transaction does not exist."
+        }
+        require(original.reversesTransactionId == null) {
+            "A reversal transaction cannot itself be reversed."
+        }
+        operationDao.getByIdempotencyKey(idempotencyKey)?.let { existingOperation ->
+            require(existingOperation.kind == REVERSAL_KIND) {
+                "Idempotency key has already been used for another operation."
+            }
+            require(existingOperation.reversesOperationId == original.operationId) {
+                "Idempotency key was reused for another reversal."
+            }
+            return@withTransaction requireNotNull(
+                transactionDao.getByOperationId(existingOperation.id),
+            ).toDomain()
+        }
+
+        val originalOperation = requireNotNull(operationDao.getById(original.operationId))
+        require(operationDao.getReversal(original.operationId) == null) {
+            "Transaction has already been reversed."
+        }
+        val originalEntries = ledgerEntryDao.getForOperation(original.operationId)
+        require(originalEntries.isNotEmpty()) { "Transaction has no ledger entries to reverse." }
+        require(isLedgerBalanced(originalEntries.map { entry ->
+            LedgerPosting(entry.accountId, LedgerSide.valueOf(entry.side), entry.amountToman)
+        })) { "Original transaction ledger is not balanced." }
+
+        val createdAtMillis = System.currentTimeMillis()
+        val reversalOperationId = UUID.randomUUID().toString()
+        val reversalTransactionId = UUID.randomUUID().toString()
+        operationDao.insert(
+            FinancialOperationEntity(
+                id = reversalOperationId,
+                idempotencyKey = idempotencyKey,
+                kind = REVERSAL_KIND,
+                createdAtMillis = createdAtMillis,
+                occurredOnEpochDay = original.occurredOnEpochDay,
+                accountId = originalOperation.accountId,
+                reversesOperationId = original.operationId,
+            ),
+        )
+        transactionDao.insert(
+            TransactionEntity(
+                id = reversalTransactionId,
+                operationId = reversalOperationId,
+                accountId = original.accountId,
+                type = if (original.type == TransactionType.INCOME.name) {
+                    TransactionType.EXPENSE.name
+                } else {
+                    TransactionType.INCOME.name
+                },
+                title = "لغو: ${original.title}",
+                amountToman = original.amountToman,
+                category = original.category,
+                createdAtMillis = createdAtMillis,
+                occurredOnEpochDay = original.occurredOnEpochDay,
+                reversesTransactionId = original.id,
+            ),
+        )
+        val reversalEntries = originalEntries.map { entry ->
+            LedgerEntryEntity(
+                id = UUID.randomUUID().toString(),
+                operationId = reversalOperationId,
+                accountId = entry.accountId,
+                side = if (entry.side == LEDGER_DEBIT) LEDGER_CREDIT else LEDGER_DEBIT,
+                amountToman = entry.amountToman,
+            )
+        }
+        insertBalancedEntries(reversalOperationId, reversalEntries)
+        require(originalEntries.sumOf { it.amountToman } == reversalEntries.sumOf { it.amountToman })
+        transactionDao.getById(reversalTransactionId).let(::requireNotNull).toDomain()
+    }
+
     private suspend fun ensureSystemAccounts() {
         listOf(
             AccountEntity(SYSTEM_INCOME_ID, "درآمد", "SYSTEM_INCOME", true, true, null, null),
@@ -233,6 +330,7 @@ class RoomTransactionRepository(
 
     private companion object {
         const val ACCOUNT_OPENING_KIND = "ACCOUNT_OPENING"
+        const val REVERSAL_KIND = "REVERSAL"
         const val SYSTEM_INCOME_ID = "system-income"
         const val SYSTEM_EXPENSE_ID = "system-expense"
         const val SYSTEM_OPENING_EQUITY_ID = "system-opening-equity"

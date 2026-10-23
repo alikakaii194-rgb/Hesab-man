@@ -7,7 +7,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -18,6 +17,7 @@ import com.roshdmali.app.domain.AccountBalance
 import com.roshdmali.app.domain.AccountDraft
 import com.roshdmali.app.domain.FinancialTransaction
 import com.roshdmali.app.domain.TransactionDraft
+import com.roshdmali.app.domain.TransactionType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Rule
@@ -63,6 +63,13 @@ class HomeScreenTest {
             repository.transactions.value.size == 1
         }
         composeRule.onNodeWithText("حقوق ماهانه").assertIsDisplayed()
+        composeRule.onNodeWithText("تراکنش‌ها").performClick()
+        composeRule.onNodeWithText("لغو").performClick()
+        composeRule.onNodeWithText("تأیید لغو").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            repository.transactions.value.size == 2
+        }
+        composeRule.onNodeWithText("لغو: حقوق ماهانه").assertIsDisplayed()
     }
 
     private class FakeTransactionRepository : TransactionRepository {
@@ -99,6 +106,23 @@ class HomeScreenTest {
             )
             transactions.value += transaction
             return transaction
+        }
+
+        override suspend fun reverseTransaction(
+            transactionId: String,
+            idempotencyKey: String,
+        ): FinancialTransaction {
+            transactions.value.firstOrNull { it.reversesTransactionId == transactionId }?.let { return it }
+            val original = requireNotNull(transactions.value.firstOrNull { it.id == transactionId })
+            val reversal = original.copy(
+                id = "reversal-${original.id}",
+                operationId = "reversal-operation-${original.operationId}",
+                type = if (original.type == TransactionType.INCOME) TransactionType.EXPENSE else TransactionType.INCOME,
+                title = "لغو: ${original.title}",
+                reversesTransactionId = original.id,
+            )
+            transactions.value += reversal
+            return reversal
         }
     }
 }
