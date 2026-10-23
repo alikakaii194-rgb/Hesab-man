@@ -95,6 +95,7 @@ class RoomTransactionRepositoryTest {
         }
 
         val reversal = repository.reverseTransaction(income.id, "reverse-income-key")
+        assertEquals(LocalDate.now().toEpochDay(), reversal.occurredOnEpochDay)
         val repeatedReversal = repository.reverseTransaction(income.id, "reverse-income-key")
         assertEquals(reversal.id, repeatedReversal.id)
         assertEquals(60_000L, repository.observeAccountBalances().first().single().balanceToman.longValueExact())

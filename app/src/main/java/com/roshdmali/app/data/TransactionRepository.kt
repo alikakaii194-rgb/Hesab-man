@@ -243,6 +243,8 @@ class RoomTransactionRepository(
         require(operationDao.getReversal(original.operationId) == null) {
             "Transaction has already been reversed."
         }
+        val todayEpochDay = LocalDate.now().toEpochDay()
+        val reversalEpochDay = maxOf(original.occurredOnEpochDay ?: todayEpochDay, todayEpochDay)
         val originalEntries = ledgerEntryDao.getForOperation(original.operationId)
         require(originalEntries.isNotEmpty()) { "Transaction has no ledger entries to reverse." }
         require(isLedgerBalanced(originalEntries.map { entry ->
@@ -258,7 +260,7 @@ class RoomTransactionRepository(
                 idempotencyKey = idempotencyKey,
                 kind = REVERSAL_KIND,
                 createdAtMillis = createdAtMillis,
-                occurredOnEpochDay = original.occurredOnEpochDay,
+                occurredOnEpochDay = reversalEpochDay,
                 accountId = originalOperation.accountId,
                 reversesOperationId = original.operationId,
             ),
@@ -277,7 +279,7 @@ class RoomTransactionRepository(
                 amountToman = original.amountToman,
                 category = original.category,
                 createdAtMillis = createdAtMillis,
-                occurredOnEpochDay = original.occurredOnEpochDay,
+                occurredOnEpochDay = reversalEpochDay,
                 reversesTransactionId = original.id,
             ),
         )

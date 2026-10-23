@@ -119,6 +119,7 @@ class HomeScreenTest {
                 operationId = "reversal-operation-${original.operationId}",
                 type = if (original.type == TransactionType.INCOME) TransactionType.EXPENSE else TransactionType.INCOME,
                 title = "لغو: ${original.title}",
+                occurredOnEpochDay = maxOf(original.occurredOnEpochDay ?: java.time.LocalDate.now().toEpochDay(), java.time.LocalDate.now().toEpochDay()),
                 reversesTransactionId = original.id,
             )
             transactions.value += reversal

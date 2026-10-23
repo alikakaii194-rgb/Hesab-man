@@ -113,6 +113,22 @@ class FinancialTransactionTest {
 
         assertEquals(java.time.LocalDate.of(2024, 3, 20).toEpochDay(), nowruz.toEpochDayOrNull())
         assertEquals(nowruz, requireNotNull(nowruz.toEpochDayOrNull()).toPersianDate())
+        assertEquals(
+            java.time.LocalDate.of(2024, 3, 19).toEpochDay(),
+            PersianDate(1402, 12, 29).toEpochDayOrNull(),
+        )
+        assertEquals(
+            java.time.LocalDate.of(2025, 3, 20).toEpochDay(),
+            PersianDate(1403, 12, 30).toEpochDayOrNull(),
+        )
+        assertEquals(
+            PersianDate(1403, 12, 30),
+            requireNotNull(PersianDate(1403, 12, 30).toEpochDayOrNull()).toPersianDate(),
+        )
+        assertEquals(
+            PersianDate(1404, 1, 1),
+            (requireNotNull(PersianDate(1403, 12, 30).toEpochDayOrNull()) + 1).toPersianDate(),
+        )
         assertNull(PersianDate(1402, 12, 30).toEpochDayOrNull())
         assertEquals(1403, "۱۴۰۳/۰۱/۰۱".parsePersianDateEpochDay()?.toPersianDate()?.year)
     }
