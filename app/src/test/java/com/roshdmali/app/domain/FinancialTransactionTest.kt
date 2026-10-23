@@ -2,7 +2,9 @@ package com.roshdmali.app.domain
 
 import java.math.BigInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FinancialTransactionTest {
@@ -11,6 +13,8 @@ class FinancialTransactionTest {
         assertEquals(12_345L, parseTomanAmount("۱۲٬۳۴۵"))
         assertEquals(12_345L, parseTomanAmount("١٢,٣٤٥"))
         assertEquals(12_345L, parseTomanAmount("12 345"))
+        assertEquals(12_345L, parseRialAmount("۱۲۳۴۵۰"))
+        assertNull(parseRialAmount("۱۲۳۴۵۱"))
     }
 
     @Test
@@ -20,6 +24,9 @@ class FinancialTransactionTest {
         assertNull(parseTomanAmount("12.5"))
         assertNull(parseTomanAmount("-12"))
         assertNull(parseTomanAmount("۹۲۲۳۳۷۲۰۳۶۸۵۴۷۷۵۸۰۸"))
+        assertEquals(0L, parseTomanAmount("۰", allowZero = true))
+        assertEquals(0L, parseRialAmount("۰", allowZero = true))
+        assertNull(parseRialAmount("۹۲۲۳۳۷۲۰۳۶۸۵۴۷۷۵۸۰۸۰"))
     }
 
     @Test
@@ -38,17 +45,67 @@ class FinancialTransactionTest {
     }
 
     @Test
+    fun accountBalanceIncludesOpeningIncomeAndExpensePostings() {
+        val postings = listOf(
+            LedgerPosting("cash", LedgerSide.DEBIT, 100_000L),
+            LedgerPosting("cash", LedgerSide.DEBIT, 25_000L),
+            LedgerPosting("cash", LedgerSide.CREDIT, 40_000L),
+        )
+
+        assertEquals(BigInteger.valueOf(85_000L), calculateAccountBalance(postings))
+        assertEquals(BigInteger.ZERO, calculateAccountBalance(emptyList()))
+    }
+
+    @Test
+    fun accountBalanceCanBeNegativeWithoutOverflow() {
+        val postings = listOf(
+            LedgerPosting("cash", LedgerSide.DEBIT, 10L),
+            LedgerPosting("cash", LedgerSide.CREDIT, 30L),
+        )
+
+        assertEquals(BigInteger.valueOf(-20L), calculateAccountBalance(postings))
+    }
+
+    @Test
+    fun ledgerOperationsRequireEqualDebitAndCreditTotals() {
+        assertTrue(
+            isLedgerBalanced(
+                listOf(
+                    LedgerPosting("cash", LedgerSide.DEBIT, Long.MAX_VALUE),
+                    LedgerPosting("income", LedgerSide.CREDIT, Long.MAX_VALUE),
+                ),
+            ),
+        )
+        assertFalse(isLedgerBalanced(listOf(LedgerPosting("cash", LedgerSide.DEBIT, 100L))))
+        assertFalse(isLedgerBalanced(listOf(LedgerPosting("cash", LedgerSide.DEBIT, 0L))))
+    }
+
+    @Test
     fun formatsTomanWithPersianDigitsAndGrouping() {
         assertEquals("۱,۲۳۴,۵۶۷", formatTomanAmount(BigInteger.valueOf(1_234_567L)))
         assertEquals("-۱۲", formatTomanAmount(BigInteger.valueOf(-12L)))
     }
 
+    @Test
+    fun convertsPersianCalendarDatesToAndFromEpochDays() {
+        val nowruz = PersianDate(1403, 1, 1)
+
+        assertEquals(java.time.LocalDate.of(2024, 3, 20).toEpochDay(), nowruz.toEpochDayOrNull())
+        assertEquals(nowruz, requireNotNull(nowruz.toEpochDayOrNull()).toPersianDate())
+        assertNull(PersianDate(1402, 12, 30).toEpochDayOrNull())
+        assertEquals(1403, "۱۴۰۳/۰۱/۰۱".parsePersianDateEpochDay()?.toPersianDate()?.year)
+    }
+
     private fun transaction(type: TransactionType, amountToman: Long) = FinancialTransaction(
         id = "test-${type.name}-$amountToman",
+        operationId = "operation-${type.name}-$amountToman",
+        accountId = "account-test",
         type = type,
         title = "تست",
         amountToman = amountToman,
         category = "تست",
-        occurredAtMillis = 0L,
+        createdAtMillis = 0L,
+        occurredOnEpochDay = 0L,
+        reversesTransactionId = null,
     )
 }

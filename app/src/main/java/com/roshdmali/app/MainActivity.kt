@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
     private val financeViewModel: FinanceViewModel by viewModels {
         FinanceViewModelFactory(
             RoomTransactionRepository(
-                RoshdMaliDatabase.getInstance(applicationContext).transactionDao(),
+                RoshdMaliDatabase.getInstance(applicationContext),
             ),
         )
     }
